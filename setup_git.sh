@@ -1,0 +1,38 @@
+# 查看git配置
+git config --list --list --show-origin [--local|--global|--system]
+
+# 设置提交代码时的用户信息
+git config [--global|--local] user.name "用户名"
+git config [--global|--local] user.email "邮箱"
+# git config --unset user.name
+# git config --unset user.email
+
+# 生成ssh-key
+ssh-keygen -o -t rsa -C "your_email@company.com" -b 4096 -f ~/.ssh/company_github  #公司邮箱
+ssh-keygen -o -t rsa -C "your_email@github.com" -b 4096 -f ~/.ssh/personal_github  #个人邮箱
+
+# 查看ssh-key
+cat ~/.ssh/company_github.pub
+cat ~/.ssh/personal_github.pub
+
+# 去github粘贴配置公钥！！！
+
+# 配置~/.ssh/config
+# 个人
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/personal_github
+    IdentitiesOnly yes
+
+# 测试ssh-key
+ssh -T git@github.com
+
+# 查看远程仓库地址
+git remote -v
+# 删除远程仓库地址
+git remote rm origin
+# 添加远程仓库地址
+git remote add origin git@github.com:用户名/仓库名.git
+# 提交代码
+git push -u origin master
