@@ -1,4 +1,4 @@
-from logger import logger
+from .logger import logger
 import csv
 import json
 import pandas as pd
@@ -262,18 +262,3 @@ def write_parquet(df, file_path, **kwargs):
     """
     df.to_parquet(file_path, **kwargs)
     logger.info(f"Write Parquet file '{file_path}'. Shape: {df.shape}")
-
-def test_all():
-    write_txt(['1', '2', '3'], 'test_files/test.txt')
-    read_txt('test_files/test.txt')
-    write_jsonl([{'1': 1}, {'2': 2}], 'test_files/test.jsonl')
-    read_jsonl('test_files/test.jsonl')
-    write_json({'1': 1}, 'test_files/test.json')
-    read_json('test_files/test.json')
-    write_csv([['1', '2'], ['3', '4']], 'test_files/test.csv')
-    read_csv('test_files/test.csv')
-    read_parquet('/mnt/hdfs/hjx/data/content2poi/online_sample_100w')
-
-
-if __name__ == '__main__':
-    test_all()

@@ -3,7 +3,7 @@ import requests
 import base64
 import io
 import os
-from logger import logger
+from .logger import logger
 
 IMG_FORMAT_MAP = {
     'jpg': 'JPEG',
@@ -246,15 +246,3 @@ def test_func(img_path):
     img_pil = ImageTool.base64_to_img(img_base64)
     return img_pil
 
-def test_class(img_path):
-    img_tool = ImageTool(img_path)
-    img_tool.visualize_img()
-    new = img_tool.resize_img(scale=0.2)
-    ImageTool(img_pil=new).visualize_img()
-
-
-if __name__ == '__main__':
-    # img_path = 'test_files/example.jpg'
-    img_path = 'https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg'
-    test_func(img_path)
-    test_class(img_path)

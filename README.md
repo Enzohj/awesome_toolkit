@@ -1,69 +1,177 @@
-# Python Toolkit
+# awesome_toolkit
 
-This Python toolkit provides two main utility classes, `FileTool` and `ImageTool`, designed to simplify file operations and image processing tasks.
+A comprehensive Python utility toolkit that provides standardized interfaces for common operations including file handling, image processing, logging, and parallel processing.
 
 ## Table of Contents
-- [Project Overview](#project-overview)
-- [Classes and Functions](#classes-and-functions)
-  - [FileTool](#filetool)
-  - [ImageTool](#imagetool)
-- [Usage Examples](#usage-examples)
-  - [FileTool Usage](#filetool-usage)
-  - [ImageTool Usage](#imagetool-usage)
-- [Environment Setup](#environment-setup)
-- [Contributing](#contributing)
 
-## Project Overview
-This project offers a set of tools for common file operations and image processing. The `FileTool` class handles reading and writing various file formats, while the `ImageTool` class provides functions for image conversion, loading, saving, and resizing.
+- [Introduction](#introduction)
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [License](#license)
+- [Copyright](#copyright)
 
-## Classes and Functions
+## Introduction
 
-### FileTool
-The `FileTool` class provides methods for reading and writing different file formats, including text, CSV, JSON, and Parquet files.
+`awesome_toolkit` is a collection of Python utilities designed to simplify and standardize common programming tasks. It provides a clean, consistent API for file operations, image processing, logging, and multi-processing/multi-threading, allowing developers to focus on their core application logic rather than reimplementing these common functionalities.
 
-- `read_txt(file_path, encoding='utf-8')`: Reads the contents of a text file.
-- `write_txt(file_path, content, encoding='utf-8', mode='w')`: Writes text content to a file.
-- `read_csv(file_path, delimiter=',', header=0, encoding='utf-8')`: Reads a CSV file into a pandas DataFrame.
-- `write_csv(file_path, data, delimiter=',', index=False, encoding='utf-8')`: Writes a pandas DataFrame to a CSV file.
-- `read_json(file_path, encoding='utf-8')`: Reads the contents of a JSON file.
-- `write_json(file_path, data, indent=4, encoding='utf-8')`: Writes data to a JSON file.
-- `read_parquet(file_path, engine='pyarrow')`: Reads a Parquet file into a pandas DataFrame.
-- `write_parquet(file_path, data, engine='pyarrow')`: Writes a pandas DataFrame to a Parquet file.
+## Features
 
-### ImageTool
-The `ImageTool` class provides methods for image conversion, loading, saving, and resizing.
+- **File Operations** (`file.py`)
+  - Support for multiple file formats: TXT, CSV, JSON, JSONL, Parquet
+  - Consistent read/write interfaces with comprehensive logging
+  - Flexible options for encoding, appending, and format-specific parameters
 
-- `__init__(img_path=None, img_bytes=None, img_base64=None, img_pil=None)`: Initializes the `ImageTool` class with an image source.
-- `img_to_base64(img_pil, img_format='JPEG')`: Converts a PIL image object to a Base64 string.
-- `load_img(img_path, only_img=True)`: Loads an image from a local path or URL.
-- `img_to_bytes(img_pil, img_format='JPEG')`: Converts a PIL image object to bytes.
-- `base64_to_bytes(img_base64)`: Converts a Base64 string to bytes.
-- `base64_to_img(img_base64, need_bytes=False)`: Converts a Base64 string to a PIL image object.
-- `save_img(save_path, img_format=None)`: Saves the PIL image object to a file.
-- `visualize_img()`: Visualizes the PIL image object.
-- `resize_img(size=None, scale=None)`: Resizes the PIL image object.
+- **Image Processing** (`image.py`)
+  - Seamless conversion between PIL Images, byte streams, and Base64 strings
+  - Support for loading images from local paths or URLs
+  - Image manipulation: resizing, visualization, format conversion
+  - Comprehensive error handling and logging
 
-## Usage Examples
+- **Logging** (`logger.py`)
+  - Unified logging interface that works with both loguru and standard logging
+  - Consistent API regardless of the underlying logging library
+  - Configurable log levels and output destinations
+  - Automatic fallback to standard logging when loguru is not available
 
-### FileTool Usage
-```python:/mnt/bn/hjx-nas-arnold/python_tool/example.py
-from file import FileTool
+- **Multi-Processing/Multi-Threading** (`mp.py`)
+  - Simple interfaces for parallel execution using threads or processes
+  - Built-in progress tracking with tqdm
+  - Flexible worker count configuration
+  - Support for both finite collections and generators
 
-# Initialize FileTool
-file_tool = FileTool()
+## Installation
 
-# Read a text file
-text_content = file_tool.read_txt('example.txt')
-print(text_content)
+### Prerequisites
 
-# Write a text file
-file_tool.write_txt('output.txt', 'Hello, World!')
+- Python 3.x
 
-# Read a CSV file
-import pandas as pd
-csv_data = file_tool.read_csv('data.csv')
-print(csv_data.head())
+### Basic Installation
 
-# Write a CSV file
-df = pd.DataFrame({'col1': [1, 2, 3], 'col2': ['a', 'b', 'c']})
-file_tool.write_csv('output.csv', df)
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Enzohj/awesome_toolkit.git
+   cd awesome_toolkit
+   ```
+
+2. Install the required dependencies:
+   ```bash
+   pip install -r setup_env/requirements.txt
+   ```
+
+### Additional Dependencies
+
+While only `loguru` is explicitly listed in requirements.txt, the toolkit has implicit dependencies on:
+
+- `Pillow` (PIL) - For image processing
+- `pandas` - For data handling and Parquet file operations
+- `requests` - For downloading images from URLs
+- `tqdm` - For progress bars
+
+Install these dependencies as needed:
+
+```bash
+pip install pillow pandas requests tqdm
+```
+
+## Usage
+
+### File Operations
+
+```python
+from awesome_toolkit.file import read_txt, write_txt, read_json, write_json, read_csv, write_csv, read_jsonl, write_jsonl, read_parquet, write_parquet
+
+# TXT file operations
+lines = read_txt('data.txt', encoding='utf-8', as_lines=True)
+write_txt(['Line 1', 'Line 2'], 'output.txt', append=False)
+
+# JSON file operations
+data = read_json('config.json')
+write_json({'key': 'value'}, 'output.json', indent=4)
+
+# JSONL file operations
+records = read_jsonl('data.jsonl')
+write_jsonl([{'id': 1}, {'id': 2}], 'output.jsonl')
+
+# CSV file operations
+rows = read_csv('data.csv', delimiter=',', engine='csv')
+write_csv([['id', 'name'], [1, 'John']], 'output.csv', header=None)
+
+# Parquet file operations
+df = read_parquet('data.parquet')
+write_parquet(df, 'output.parquet')
+```
+
+### Image Processing
+
+```python
+from awesome_toolkit.image import ImageTool
+
+# Load image from file path
+img_tool = ImageTool(img_path='image.jpg')
+
+# Load image from URL
+img_tool = ImageTool(img_path='https://example.com/image.jpg')
+
+# Convert between different formats
+img_bytes = ImageTool.img_to_bytes(img_tool.img_pil)
+img_base64 = ImageTool.bytes_to_base64(img_bytes)
+img_pil = ImageTool.base64_to_img(img_base64)
+
+# Resize image
+resized_img = img_tool.resize_img(scale=0.5)
+
+# Save image
+img_tool.save_img('output.jpg')
+
+# Visualize image
+img_tool.visualize_img()
+```
+
+### Logging
+
+```python
+from awesome_toolkit.logger import logger, setup_logger
+
+# Configure the logger
+setup_logger(level="INFO", output_file="app.log")
+
+# Use the logger
+logger.debug("Debug message")
+logger.info("Info message")
+logger.warning("Warning message")
+logger.error("Error message")
+logger.critical("Critical message")
+```
+
+### Multi-Processing/Multi-Threading
+
+```python
+from awesome_toolkit.mp import apply_multi_thread, apply_multi_process
+
+# Define a function to process each item
+def process_item(x):
+    return x * 2
+
+# Process items using multiple threads
+data = list(range(100))
+results = apply_multi_thread(data, process_item, num_workers=8)
+
+# Process items using multiple processes
+results = apply_multi_process(data, process_item, num_workers=4)
+
+# Process a generator with progress bar
+def item_generator():
+    for i in range(100):
+        yield i
+
+results = apply_multi_thread(item_generator(), process_item, total_num=100)
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Copyright
+
+Copyright (c) 2025 Enzohj
