@@ -1,10 +1,10 @@
-from loguru import logger
+from logger import logger
 import csv
 import json
 import pandas as pd
 import os
 from tqdm import tqdm
-
+from io import StringIO
 
 # ========================
 # TXT 文件读写
@@ -26,20 +26,20 @@ def read_txt(file_path, encoding='utf-8', as_lines=True):
         if as_lines:
             content = f.readlines()
             content = [line.strip() for line in content]
-            logger.debug(f"Read {len(content)} lines from '{file_path}'")
+            logger.info(f"Read {len(content)} lines from '{file_path}'")
         else:
             content = f.read()
-            logger.debug(f"Read {len(content)} characters from '{file_path}'")
+            logger.info(f"Read {len(content)} characters from '{file_path}'")
         return content
 
 
-def write_txt(file_path, content, encoding='utf-8', append=False):
+def write_txt(content, file_path, encoding='utf-8', append=False):
     """
     写入 TXT 文件内容。
 
     参数:
-        file_path (str): 文件路径。
         content (str 或 list): 要写入的内容。
+        file_path (str): 文件路径。
         encoding (str): 文件编码，默认 utf-8。
         append (bool): 是否追加写入，默认 False。
     """
@@ -48,10 +48,10 @@ def write_txt(file_path, content, encoding='utf-8', append=False):
         if isinstance(content, list):
             content = [line + '\n' for line in content]
             f.writelines(content)
-            logger.debug(f"Wrote {len(content)} lines to '{file_path}' in {'append' if append else 'write'} mode")
+            logger.info(f"Write {len(content)} lines to '{file_path}' in {'append' if append else 'write'} mode")
         else:
             f.write(content)
-            logger.debug(f"Wrote {len(content)} characters to '{file_path}' in {'append' if append else 'write'} mode")
+            logger.info(f"Write {len(content)} characters to '{file_path}' in {'append' if append else 'write'} mode")
 
 
 # ========================
@@ -78,7 +78,7 @@ def read_csv(file_path, encoding='utf-8', delimiter=',', engine=None, skip_heade
 
     if engine == 'pandas':
         df = pd.read_csv(file_path, sep=delimiter, encoding=encoding, **kwargs)
-        logger.debug(f"Read CSV file '{file_path}' using pandas. Shape: {df.shape}")
+        logger.info(f"Read CSV file '{file_path}' using pandas. Shape: {df.shape}")
         return df
     else:
         with open(file_path, 'r', encoding=encoding) as f:
@@ -86,17 +86,17 @@ def read_csv(file_path, encoding='utf-8', delimiter=',', engine=None, skip_heade
             if skip_header:
                 next(reader)
             data = [row for row in reader]
-            logger.debug(f"Read CSV file '{file_path}' using csv module. {len(data)} rows read")
+            logger.info(f"Read CSV file '{file_path}' using csv module. {len(data)} rows read")
             return data
 
 
-def write_csv(file_path, data, encoding='utf-8', append=False, delimiter=',', engine=None, header=None, **kwargs):
+def write_csv(data, file_path, encoding='utf-8', append=False, delimiter=',', engine=None, header=None, **kwargs):
     """
     写入 CSV 文件。
 
     参数:
-        file_path (str): 文件路径。
         data (list 或 pd.DataFrame): 要写入的数据。
+        file_path (str): 文件路径。
         encoding (str): 文件编码，默认 utf-8。
         append (bool): 是否追加写入，默认 False。
         delimiter (str): 分隔符，默认 ','。
@@ -113,14 +113,14 @@ def write_csv(file_path, data, encoding='utf-8', append=False, delimiter=',', en
     if engine == 'pandas':
         mode = 'a' if append else 'w'
         data.to_csv(file_path, index=False, sep=delimiter, mode=mode, encoding=encoding, **kwargs)
-        logger.debug(f"Wrote DataFrame to '{file_path}' in {'append' if append else 'write'} mode. Shape: {data.shape}")
+        logger.info(f"Write DataFrame to '{file_path}' in {'append' if append else 'write'} mode. Shape: {data.shape}")
     else:
         with open(file_path, 'a' if append else 'w', newline='', encoding=encoding) as f:
             writer = csv.writer(f, delimiter=delimiter)
             if header:
                 writer.writerow(header)
             writer.writerows(data)
-            logger.debug(f"Wrote {len(data)} rows to '{file_path}' in {'append' if append else 'write'} mode")
+            logger.info(f"Write {len(data)} rows to '{file_path}' in {'append' if append else 'write'} mode")
 
 
 # ========================
@@ -140,24 +140,24 @@ def read_json(file_path, encoding='utf-8'):
     """
     with open(file_path, 'r', encoding=encoding) as f:
         data = json.load(f)
-        logger.debug(f"Read JSON file '{file_path}' successfully")
+        logger.info(f"Read JSON file '{file_path}' successfully")
         return data
 
 
-def write_json(file_path, data, encoding='utf-8', ensure_ascii=False, indent=4):
+def write_json(data, file_path, encoding='utf-8', ensure_ascii=False, indent=4):
     """
     写入 JSON 文件。
 
     参数:
-        file_path (str): 文件路径。
         data (dict): 要写入的数据。
+        file_path (str): 文件路径。
         encoding (str): 文件编码，默认 utf-8。
         ensure_ascii (bool): 是否确保 ASCII 编码，默认 False。
         indent (int): 缩进空格数，默认 4。
     """
     with open(file_path, 'w', encoding=encoding) as f:
         json.dump(data, f, ensure_ascii=ensure_ascii, indent=indent)
-        logger.debug(f"Wrote JSON data to '{file_path}'")
+        logger.info(f"Write JSON data to '{file_path}'")
 
 
 # ========================
@@ -177,23 +177,23 @@ def read_jsonl(file_path, encoding='utf-8'):
     """
     with open(file_path, 'r', encoding=encoding) as f:
         data = [json.loads(line) for line in f if line.strip()]
-        logger.debug(f"Read {len(data)} JSON objects from '{file_path}'")
+        logger.info(f"Read {len(data)} JSON objects from '{file_path}'")
         return data
 
 
-def write_jsonl(file_path, data, encoding='utf-8'):
+def write_jsonl(data, file_path, encoding='utf-8'):
     """
     写入 JSONL 文件（每行一个 JSON 对象）。
 
     参数:
-        file_path (str): 文件路径。
         data (list): 要写入的对象列表。
+        file_path (str): 文件路径。
         encoding (str): 文件编码，默认 utf-8。
     """
     with open(file_path, 'w', encoding=encoding) as f:
         for item in data:
             f.write(json.dumps(item, ensure_ascii=False) + '\n')
-        logger.debug(f"Wrote {len(data)} JSON objects to '{file_path}'")
+        logger.info(f"Write {len(data)} JSON objects to '{file_path}'")
 
 
 # ========================
@@ -214,7 +214,10 @@ def read_parquet(file_root):
     if os.path.isfile(file_root):
         try:
             data = pd.read_parquet(file_root)
-            logger.debug(f"Successfully read Parquet file from '{file_root}'. Shape: {data.shape}")
+            logger.info(f"Successfully read Parquet file from '{file_root}'. Shape: {data.shape}")
+            buffer = StringIO()
+            data.info(buf=buffer)
+            logger.debug(f'\n{buffer.getvalue()}')
             return data
         except Exception as e:
             logger.error(f"Error reading {file_root}: {e}")
@@ -229,6 +232,7 @@ def read_parquet(file_root):
             file_path = os.path.join(file_root, file_name)
             try:
                 chunks = pd.read_parquet(file_path)
+                logger.info(f"Read Parquet file from '{file_path}'. Shape: {chunks.shape}")
                 all_chunks.append(chunks)
                 del chunks
             except Exception as e:
@@ -238,25 +242,38 @@ def read_parquet(file_root):
         if all_chunks:
             data = pd.concat(all_chunks, ignore_index=True)
             logger.info(f"Successfully concatenated {len(all_chunks)} Parquet files. Shape: {data.shape}")
+            buffer = StringIO()
+            data.info(buf=buffer)
+            logger.debug(f'\n{buffer.getvalue()}')
             return data
         else:
             logger.error(f"No data found in directory {file_root}")
             return pd.DataFrame()
 
 
-def write_parquet(file_path, df, **kwargs):
+def write_parquet(df, file_path, **kwargs):
     """
     写入 Parquet 文件。
 
     参数:
-        file_path (str): 文件路径。
         df (pd.DataFrame): 要写入的 DataFrame。
+        file_path (str): 文件路径。
         **kwargs: 传递给 DataFrame.to_parquet 的额外参数。
     """
     df.to_parquet(file_path, **kwargs)
-    logger.debug(f"Wrote Parquet file '{file_path}'. Shape: {df.shape}")
+    logger.info(f"Write Parquet file '{file_path}'. Shape: {df.shape}")
+
+def test_all():
+    write_txt(['1', '2', '3'], 'test_files/test.txt')
+    read_txt('test_files/test.txt')
+    write_jsonl([{'1': 1}, {'2': 2}], 'test_files/test.jsonl')
+    read_jsonl('test_files/test.jsonl')
+    write_json({'1': 1}, 'test_files/test.json')
+    read_json('test_files/test.json')
+    write_csv([['1', '2'], ['3', '4']], 'test_files/test.csv')
+    read_csv('test_files/test.csv')
+    read_parquet('/mnt/hdfs/hjx/data/content2poi/online_sample_100w')
 
 
 if __name__ == '__main__':
-    parquet_dir = '/mnt/hdfs/hjx/data/content2poi/online_sample_100w/part-00000-a605e751-2ec0-4768-a95c-0043bd8dd26e-c000.gz.parquet'
-    data = read_parquet(parquet_dir)
+    test_all()

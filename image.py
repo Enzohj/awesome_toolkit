@@ -3,8 +3,7 @@ import requests
 import base64
 import io
 import os
-# os.environ['LOGURU_LEVEL'] = 'INFO'
-from loguru import logger
+from logger import logger
 
 IMG_FORMAT_MAP = {
     'jpg': 'JPEG',
@@ -237,28 +236,25 @@ class ImageTool:
             logger.error(f"Error resizing image: {e}")
             raise e
 
+def test_func(img_path):
+    img_pil, img_bytes, img_format = ImageTool.load_img(img_path, only_img=False)
+    img_bytes = ImageTool.img_to_bytes(img_pil, img_format=img_format)
+    img_base64 = ImageTool.bytes_to_base64(img_bytes)
+    img_bytes = ImageTool.base64_to_bytes(img_base64)
+    img_pil = ImageTool.bytes_to_img(img_bytes)
+    img_base64 = ImageTool.img_to_base64(img_pil, img_format=img_format)
+    img_pil = ImageTool.base64_to_img(img_base64)
+    return img_pil
+
+def test_class(img_path):
+    img_tool = ImageTool(img_path)
+    img_tool.visualize_img()
+    new = img_tool.resize_img(scale=0.2)
+    ImageTool(img_pil=new).visualize_img()
+
 
 if __name__ == '__main__':
     # img_path = 'test_files/example.jpg'
     img_path = 'https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg'
-
-    def test_func(img_path):
-        img_pil, img_bytes, img_format = ImageTool.load_img(img_path, only_img=False)
-        img_bytes = ImageTool.img_to_bytes(img_pil, img_format=img_format)
-        img_base64 = ImageTool.bytes_to_base64(img_bytes)
-        img_bytes = ImageTool.base64_to_bytes(img_base64)
-        img_pil = ImageTool.bytes_to_img(img_bytes)
-        img_base64 = ImageTool.img_to_base64(img_pil, img_format=img_format)
-        img_pil = ImageTool.base64_to_img(img_base64)
-        return img_pil
-
-    def test_class(img_path):
-        img_tool = ImageTool(img_path)
-        img_tool.visualize_img()
-        new = img_tool.resize_img(scale=0.2)
-        ImageTool(img_pil=new).visualize_img()
-
-        
-
     test_func(img_path)
     test_class(img_path)
