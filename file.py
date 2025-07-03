@@ -74,7 +74,7 @@ def read_csv(file_path, encoding='utf-8', delimiter=',', engine=None, skip_heade
         pd.DataFrame 或 list: 文件内容。
     """
     if engine is None:
-        engine = 'pandas'
+        engine = 'csv'
 
     if engine == 'pandas':
         df = pd.read_csv(file_path, sep=delimiter, encoding=encoding, **kwargs)
