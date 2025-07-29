@@ -226,7 +226,7 @@ def read_parquet(file_root):
     elif os.path.isdir(file_root):
         file_names = os.listdir(file_root)
         all_chunks = []
-        for file_name in tqdm(file_names, desc="Reading Parquet files"):
+        for file_name in tqdm(file_names, desc="Reading Parquet files", leave=False):
             if '_SUCCESS' in file_name:
                 continue
             file_path = os.path.join(file_root, file_name)
@@ -262,3 +262,4 @@ def write_parquet(df, file_path, **kwargs):
     """
     df.to_parquet(file_path, **kwargs)
     logger.info(f"Write Parquet file '{file_path}'. Shape: {df.shape}")
+
