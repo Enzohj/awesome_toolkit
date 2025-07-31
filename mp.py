@@ -20,12 +20,18 @@ def apply_multi_thread(iterable, func, num_workers=8, show_progess=True, total_n
             total_num = len(iterable)
         except:
             show_progess = False
+
+    def wrapper(args):
+        if isinstance(args, tuple):
+            return func(*args)
+        else:
+            return func(args)
         
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         if show_progess:
-            results = list(tqdm(executor.map(func, iterable), total=total_num))
+            results = list(tqdm(executor.map(wrapper, iterable), total=total_num))
         else:
-            results = list(executor.map(func, iterable))
+            results = list(executor.map(wrapper, iterable))
     return results
 
 def apply_multi_process(iterable, func, num_workers=8, show_progess=True, total_num=None):
@@ -63,6 +69,10 @@ if __name__ == '__main__':
     def process_item(x):
         sleep(0.1)  # 模拟耗时任务
         return x * 2
+    
+    def process_item_(x, y):
+        sleep(0.1)  # 模拟耗时任务
+        return x * y
 
     def iter_(n=100):
         for i in range(n):
@@ -71,8 +81,9 @@ if __name__ == '__main__':
     # data = list(range(100))
     data = iter_(100)
     data_ = iter_(100)
+    data4 = [(i,i*2) for i in range(100)]
     print("多线程处理结果：")
-    res1 = apply_multi_thread(data, process_item, total_num=100)
+    res1 = apply_multi_thread(data4, process_item_, total_num=100)
     print(res1)
 
     print("\n多进程处理结果：")
