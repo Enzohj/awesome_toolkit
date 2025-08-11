@@ -1,14 +1,29 @@
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing as mp
 from tqdm import tqdm
+from logger import logger
 
-def apply_multi_thread(iterable, func, num_workers=8, show_progess=True, total_num=None):
+# multi_thread
+# 受 GIL（全局解释器锁） 限制。
+# 在 Python 中，同一时间只有一个线程能执行 Python 字节码。
+# 因此，不适合 CPU 密集型任务（如大量计算）。
+# 适合 I/O 密集型任务（如网络请求、文件读写、数据库操作）。
+
+# multi_process
+# 每个进程有独立的 Python 解释器和内存空间，因此不受 GIL 影响。
+# 可以真正实现并行计算。
+# 适合 CPU 密集型任务（如图像处理、数学计算、数据压缩等）。
+
+NUM_WORKERS = mp.cpu_count()
+
+def apply_multi_thread(func, iterable, num_workers=NUM_WORKERS, show_progess=True, total_num=None):
     """
     使用多线程对 iterable 中的每个元素应用 func，并显示进度条。
     
     参数:
-        iterable: 可迭代对象（如 list, tuple 等）
         func: 要应用的函数
-        num_workers: 线程数，默认为 4
+        iterable: 可迭代对象（如 list, tuple 等）
+        num_workers: 线程数，默认为 cpu 核心数
         show_progess: 是否显示进度条，默认为 True
         total_num: 总任务数，默认为 None
     
@@ -20,6 +35,7 @@ def apply_multi_thread(iterable, func, num_workers=8, show_progess=True, total_n
             total_num = len(iterable)
         except:
             show_progess = False
+    logger.info(f"apply_multi_thread! total sample: {total_num}, num worker: {num_workers}")
 
     def wrapper(args):
         if isinstance(args, tuple):
@@ -34,14 +50,14 @@ def apply_multi_thread(iterable, func, num_workers=8, show_progess=True, total_n
             results = list(executor.map(wrapper, iterable))
     return results
 
-def apply_multi_process(iterable, func, num_workers=8, show_progess=True, total_num=None):
+def apply_multi_process(func, iterable, num_workers=NUM_WORKERS, show_progess=True, total_num=None, use_starmap=False):
     """
     使用多进程对 iterable 中的每个元素应用 func，并显示进度条。
     
     参数:
         iterable: 可迭代对象（如 list, tuple 等）
         func: 要应用的函数
-        num_workers: 进程数，默认为 4
+        num_workers: 进程数，默认为 cpu 核心数
         show_progess: 是否显示进度条，默认为 True
         total_num: 总任务数，默认为 None
     
@@ -53,39 +69,13 @@ def apply_multi_process(iterable, func, num_workers=8, show_progess=True, total_
             total_num = len(iterable)
         except:
             show_progess = False
-        
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+    logger.info(f"apply_multi_process! total sample: {total_num}, num worker: {num_workers}")
+
+    with mp.Pool(num_workers) as pool:
+        pool_map = pool.starmap if use_starmap else pool.imap
         if show_progess:
-            results = list(tqdm(executor.map(func, iterable), total=total_num))
+            results = list(tqdm(pool_map(func, iterable), total=total_num))
         else:
-            results = list(executor.map(func, iterable))
+            results = list(pool_map(func, iterable))
     return results
 
-
-
-if __name__ == '__main__':
-    from time import sleep
-
-    def process_item(x):
-        sleep(0.1)  # 模拟耗时任务
-        return x * 2
-    
-    def process_item_(x, y):
-        sleep(0.1)  # 模拟耗时任务
-        return x * y
-
-    def iter_(n=100):
-        for i in range(n):
-            yield i
-
-    # data = list(range(100))
-    data = iter_(100)
-    data_ = iter_(100)
-    data4 = [(i,i*2) for i in range(100)]
-    print("多线程处理结果：")
-    res1 = apply_multi_thread(data4, process_item_, total_num=100)
-    print(res1)
-
-    print("\n多进程处理结果：")
-    res2 = apply_multi_process(data_, process_item, total_num=100)
-    print(res2)

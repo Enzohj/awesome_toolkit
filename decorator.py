@@ -1,11 +1,9 @@
 import time
 from functools import wraps
 from logger import logger
-import concurrent.futures as futures
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import traceback
 from io import StringIO
-
-executor = futures.ThreadPoolExecutor(1)
 
 def timer(func):
     @wraps(func)
@@ -14,7 +12,7 @@ def timer(func):
         result = func(*args, **kwargs)  # 执行原函数
         end_time = time.time()  # 记录结束时间
         elapsed_time = end_time - start_time  # 计算耗时
-        logger.debug(f"func '{func.__name__}' latency: {elapsed_time:.4f} s")
+        logger.info(f"function: '{func.__name__}', latency: {elapsed_time:.4f} s")
         return result
     return wrapper
 
@@ -22,8 +20,13 @@ def timeout(seconds):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            future = executor.submit(func, *args, **kwargs)
-            return future.result(timeout=seconds)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, *args, **kwargs)
+                try:
+                    result = future.result(timeout=seconds)
+                except FutureTimeoutError:
+                    raise TimeoutError(f"Function '{func.__name__}' timed out after {seconds} seconds.")
+                return result
         return wrapper
     return decorator
 
@@ -47,13 +50,13 @@ def retry(max_attempts=3, delay=1, backoff=1):
                     last_exception = e
                     if attempt < max_attempts:
                         sleep_time = delay * (backoff ** (attempt - 1))
-                        logger.debug(f"函数 '{func.__name__}' 第 {attempt} 次尝试失败: {e}")
-                        logger.debug(f"将在 {sleep_time:.2f} 秒后重试...")
+                        logger.debug(f"function '{func.__name__}' failed, attempt {attempt}: {e}")
+                        logger.debug(f"will retry in {sleep_time:.2f} seconds...")
                         time.sleep(sleep_time)
                     else:
                         # 最后一次失败，打印详细 traceback
-                        logger.error(f"函数 '{func.__name__}' 在 {max_attempts} 次尝试后仍失败。")
-                        logger.error("详细错误信息:")
+                        logger.error(f"function '{func.__name__}' failed in {max_attempts} attempts.")
+                        logger.error("Detailed error information:")
                         buffer = StringIO()
                         buffer.write(traceback.format_exc())
                         logger.error(f'\n{buffer.getvalue()}')
@@ -62,17 +65,4 @@ def retry(max_attempts=3, delay=1, backoff=1):
         return wrapper
     return decorator
 
-if __name__ == "__main__":
-    @retry(max_attempts=3, delay=0.5)  # 指数退避：1s, 2s, 4s
-    def unstable_function():
-        import random
-        if random.random() < 0.8:
-            raise ValueError("随机错误发生")
-        return "成功！"
 
-    # 调用函数
-    try:
-        result = unstable_function()
-        print(result)
-    except ValueError as e:
-        print(f"函数最终失败: {e}")

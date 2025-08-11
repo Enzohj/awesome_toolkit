@@ -10,7 +10,7 @@ sudo apt install iputils-ping
 # 安装conda
 wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
 bash Miniforge3-Linux-x86_64.sh                # 建议安装到nas，方便复用
-conda config --set auto_activate_base false    # 关闭激活base环境
+# conda config --set auto_activate_base false  # 关闭激活base环境
 cat init_conda >> ~/.bashrc                    # 自动初始化conda环境
 printf "\n" >> ~/.bashrc
 # conda镜像

@@ -1,4 +1,4 @@
-from .logger import logger
+from logger import logger
 import csv
 import json
 import pandas as pd
@@ -58,7 +58,7 @@ def write_txt(content, file_path, encoding='utf-8', append=False):
 # CSV 文件读写
 # ========================
 
-def read_csv(file_path, encoding='utf-8', delimiter=',', engine=None, skip_header=True, **kwargs):
+def read_csv(file_path, encoding='utf-8', delimiter=',', engine='csv', skip_header=True, **kwargs):
     """
     读取 CSV 文件。
 
@@ -73,24 +73,26 @@ def read_csv(file_path, encoding='utf-8', delimiter=',', engine=None, skip_heade
     返回:
         pd.DataFrame 或 list: 文件内容。
     """
-    if engine is None:
-        engine = 'csv'
 
     if engine == 'pandas':
         df = pd.read_csv(file_path, sep=delimiter, encoding=encoding, **kwargs)
+        logger.info(f"CSV file header: {df.columns.tolist()}")
         logger.info(f"Read CSV file '{file_path}' using pandas. Shape: {df.shape}")
         return df
-    else:
+    elif engine == 'csv':
         with open(file_path, 'r', encoding=encoding) as f:
             reader = csv.reader(f, delimiter=delimiter)
             if skip_header:
-                next(reader)
+                header = next(reader)
+                logger.info(f"CSV file header: {header}")
             data = [row for row in reader]
             logger.info(f"Read CSV file '{file_path}' using csv module. {len(data)} rows read")
             return data
+    else:
+        raise ValueError(f"Unsupported engine: {engine}. Choose 'pandas' or 'csv'.")
 
 
-def write_csv(data, file_path, encoding='utf-8', append=False, delimiter=',', engine=None, header=None, **kwargs):
+def write_csv(data, file_path, encoding='utf-8', append=False, delimiter=',', engine=None, header:list=None, **kwargs):
     """
     写入 CSV 文件。
 
@@ -114,13 +116,16 @@ def write_csv(data, file_path, encoding='utf-8', append=False, delimiter=',', en
         mode = 'a' if append else 'w'
         data.to_csv(file_path, index=False, sep=delimiter, mode=mode, encoding=encoding, **kwargs)
         logger.info(f"Write DataFrame to '{file_path}' in {'append' if append else 'write'} mode. Shape: {data.shape}")
-    else:
+    elif engine == 'csv':
         with open(file_path, 'a' if append else 'w', newline='', encoding=encoding) as f:
             writer = csv.writer(f, delimiter=delimiter)
             if header:
+                logger.info(f"CSV file header: {header}")
                 writer.writerow(header)
             writer.writerows(data)
             logger.info(f"Write {len(data)} rows to '{file_path}' in {'append' if append else 'write'} mode")
+    else:
+        raise ValueError(f"Unsupported engine: {engine}. Choose 'pandas' or 'csv'.")
 
 
 # ========================
@@ -200,7 +205,7 @@ def write_jsonl(data, file_path, encoding='utf-8'):
 # Parquet 文件读写
 # ========================
 
-def read_parquet(file_root):
+def read_parquet(file_root, ignore=['_SUCCESS'])->pd.DataFrame:
     """
     读取 Parquet 文件。
 
@@ -217,7 +222,7 @@ def read_parquet(file_root):
             logger.info(f"Successfully read Parquet file from '{file_root}'. Shape: {data.shape}")
             buffer = StringIO()
             data.info(buf=buffer)
-            logger.debug(f'\n{buffer.getvalue()}')
+            logger.info(f'\n{buffer.getvalue()}')
             return data
         except Exception as e:
             logger.error(f"Error reading {file_root}: {e}")
@@ -227,7 +232,7 @@ def read_parquet(file_root):
         file_names = os.listdir(file_root)
         all_chunks = []
         for file_name in tqdm(file_names, desc="Reading Parquet files", leave=False):
-            if '_SUCCESS' in file_name:
+            if any(ignore_name in file_name for ignore_name in ignore):
                 continue
             file_path = os.path.join(file_root, file_name)
             try:
@@ -244,14 +249,14 @@ def read_parquet(file_root):
             logger.info(f"Successfully concatenated {len(all_chunks)} Parquet files. Shape: {data.shape}")
             buffer = StringIO()
             data.info(buf=buffer)
-            logger.debug(f'\n{buffer.getvalue()}')
+            logger.info(f'\n{buffer.getvalue()}')
             return data
         else:
             logger.error(f"No data found in directory {file_root}")
             return pd.DataFrame()
 
 
-def write_parquet(df, file_path, **kwargs):
+def write_parquet(df:pd.DataFrame, file_path, **kwargs):
     """
     写入 Parquet 文件。
 
@@ -263,3 +268,48 @@ def write_parquet(df, file_path, **kwargs):
     df.to_parquet(file_path, **kwargs)
     logger.info(f"Write Parquet file '{file_path}'. Shape: {df.shape}")
 
+
+def read_file(file_path:str, **kwargs):
+    """
+    读取文件。
+
+    参数:
+        file_path (str): 文件路径。
+        **kwargs: 传递给 pd.read_* 的额外参数。
+    返回:
+        文件内容。
+    """
+    if file_path.endswith('.json'):
+        return read_json(file_path, **kwargs)
+    elif file_path.endswith('.jsonl'):
+        return read_jsonl(file_path, **kwargs)
+    elif file_path.endswith('.parquet'):
+        return read_parquet(file_path, **kwargs)
+    elif file_path.endswith('.csv'):
+        return read_csv(file_path, **kwargs)
+    elif file_path.endswith('.txt'):
+        return read_txt(file_path, **kwargs)
+    else:
+        raise ValueError(f"Unsupported file format: {file_path}")
+    
+def write_file(data, file_path:str, **kwargs):
+    """
+    写入文件。
+
+    参数:
+        data: 要写入的数据。
+        file_path (str): 文件路径。
+        **kwargs: 传递额外参数
+    """
+    if file_path.endswith('.json'):
+        write_json(data, file_path, **kwargs)
+    elif file_path.endswith('.jsonl'):
+        write_jsonl(data, file_path, **kwargs)
+    elif file_path.endswith('.parquet'):
+        write_parquet(data, file_path, **kwargs)
+    elif file_path.endswith('.csv'):
+        write_csv(data, file_path, **kwargs)
+    elif file_path.endswith('.txt'):
+        write_txt(data, file_path, **kwargs)
+    else:
+        raise ValueError(f"Unsupported file format: {file_path}")

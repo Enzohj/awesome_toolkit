@@ -3,7 +3,7 @@ import requests
 import base64
 import io
 import os
-from .logger import logger
+from logger import logger
 
 IMG_FORMAT_MAP = {
     'jpg': 'JPEG',
@@ -236,13 +236,4 @@ class ImageTool:
             logger.error(f"Error resizing image: {e}")
             raise e
 
-def test_func(img_path):
-    img_pil, img_bytes, img_format = ImageTool.load_img(img_path, only_img=False)
-    img_bytes = ImageTool.img_to_bytes(img_pil, img_format=img_format)
-    img_base64 = ImageTool.bytes_to_base64(img_bytes)
-    img_bytes = ImageTool.base64_to_bytes(img_base64)
-    img_pil = ImageTool.bytes_to_img(img_bytes)
-    img_base64 = ImageTool.img_to_base64(img_pil, img_format=img_format)
-    img_pil = ImageTool.base64_to_img(img_base64)
-    return img_pil
 
