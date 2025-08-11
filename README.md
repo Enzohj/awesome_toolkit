@@ -1,6 +1,6 @@
 # awesome_toolkit
 
-A comprehensive Python utility toolkit that provides standardized interfaces for common operations including file handling, image processing, logging, and parallel processing.
+A comprehensive Python utility toolkit that provides standardized interfaces for common operations including file handling, image processing, logging, parallel processing, and useful decorators.
 
 ## Table of Contents
 
@@ -8,6 +8,7 @@ A comprehensive Python utility toolkit that provides standardized interfaces for
 - [Features](#features)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Contributing](#contributing)
 - [License](#license)
 - [Copyright](#copyright)
 
@@ -39,6 +40,11 @@ A comprehensive Python utility toolkit that provides standardized interfaces for
   - Built-in progress tracking with tqdm
   - Flexible worker count configuration
   - Support for both finite collections and generators
+
+- **Decorators** (`decorator.py`)
+  - Timer decorator for measuring function execution time
+  - Timeout decorator for limiting function execution time
+  - Retry decorator for automatically retrying failed functions with configurable backoff
 
 ## Installation
 
