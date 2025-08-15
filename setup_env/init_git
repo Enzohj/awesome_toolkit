@@ -11,14 +11,14 @@ git config [--global|--local] user.email "邮箱"
 ssh-keygen -o -t rsa -C "your_email@company.com" -b 4096 -f ~/.ssh/company_github  #公司邮箱
 ssh-keygen -o -t rsa -C "your_email@github.com" -b 4096 -f ~/.ssh/personal_github  #个人邮箱
 
-# 查看ssh-key
+# 查看公钥
 cat ~/.ssh/company_github.pub
 cat ~/.ssh/personal_github.pub
 
 # 去github粘贴配置公钥！！！
 
 # 配置~/.ssh/config
-# 个人
+# 添加私钥
 Host github.com
     HostName github.com
     User git
