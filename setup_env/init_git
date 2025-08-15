@@ -1,5 +1,5 @@
 # 查看git配置
-git config --list --list --show-origin [--local|--global|--system]
+git config --list --show-origin [--local|--global|--system]
 
 # 设置提交代码时的用户信息
 git config [--global|--local] user.name "用户名"
