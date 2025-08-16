@@ -1,6 +1,4 @@
-# log_utils.py
 import sys
-import os
 import logging
 
 try:
