@@ -10,6 +10,7 @@ fi
 model_name=$1
 if [ $# -eq 2 ]; then
     save_dir="$2"
+    mkdir -p "$save_dir"
     hf download "$model_name" --local-dir "$save_dir"
 else
     hf download "$model_name"
