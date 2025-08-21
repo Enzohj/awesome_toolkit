@@ -13,10 +13,15 @@ bash Miniforge3-Linux-x86_64.sh                # 建议安装到nas，方便复�
 # conda config --set auto_activate_base false  # 关闭激活base环境
 cat init_conda >> ~/.bashrc                    # 自动初始化conda环境
 printf "\n" >> ~/.bashrc
+
 # conda镜像
 conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
 conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/
 conda config --set show_channel_urls yes
+
+# pip镜像
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+pip config set install.trusted-host pypi.tuna.tsinghua.edu.cn
 
 # alias
 echo "alias condaa='conda activate'" >> ~/.bashrc
