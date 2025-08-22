@@ -20,8 +20,8 @@ conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/f
 conda config --set show_channel_urls yes
 
 # pip镜像
-pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/
-pip config set install.trusted-host pypi.tuna.tsinghua.edu.cn
+pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+pip config set install.trusted-host mirrors.aliyun.com
 
 # alias
 echo "alias condaa='conda activate'" >> ~/.bashrc
