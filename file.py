@@ -58,7 +58,7 @@ def write_txt(content, file_path, encoding='utf-8', append=False):
 # CSV 文件读写
 # ========================
 
-def read_csv(file_path, encoding='utf-8', delimiter=',', engine='csv', skip_header=True, **kwargs):
+def read_csv(file_path, encoding='utf-8', delimiter=',', engine='pandas', skip_header=True, **kwargs):
     """
     读取 CSV 文件。
 
