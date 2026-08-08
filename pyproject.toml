@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "my-toolkit"
+version = "0.1.0"
+description = "A small Python toolkit for file, image, logging, concurrency, and benchmarking tasks."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Jaxon" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "typing_extensions>=4.0; python_version < '3.10'",
+]
+
+[project.optional-dependencies]
+data = [
+    "pandas>=1.5",
+    "pyarrow>=10",
+]
+image = [
+    "Pillow>=9",
+    "requests>=2.28",
+    "pillow-heif>=0.16",
+]
+progress = ["tqdm>=4.64"]
+hf = ["huggingface_hub>=0.34"]
+all = [
+    "pandas>=1.5",
+    "pyarrow>=10",
+    "Pillow>=9",
+    "requests>=2.28",
+    "pillow-heif>=0.16",
+    "tqdm>=4.64",
+    "huggingface_hub>=0.34",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

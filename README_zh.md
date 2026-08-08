@@ -1,8 +1,8 @@
 # my_toolkit
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/Enzohj/my_toolkit?style=social)](https://github.com/Enzohj/my_toolkit/stargazers)
-[![GitHub last commit](https://img.shields.io/github/last-commit/Enzohj/my_toolkit)](https://github.com/Enzohj/my_toolkit/commits/main)
-[![GitHub license](https://img.shields.io/github/license/Enzohj/my_toolkit)](https://github.com/Enzohj/my_toolkit/blob/main/LICENSE)
+[![GitHub Repo stars](https://img.shields.io/github/stars/JaxonHu1024/my_toolkit?style=social)](https://github.com/JaxonHu1024/my_toolkit/stargazers)
+[![GitHub last commit](https://img.shields.io/github/last-commit/JaxonHu1024/my_toolkit)](https://github.com/JaxonHu1024/my_toolkit/commits/main)
+[![GitHub license](https://img.shields.io/github/license/JaxonHu1024/my_toolkit)](https://github.com/JaxonHu1024/my_toolkit/blob/main/LICENSE)
 
 一个简单易用的 Python 工具包，旨在简化日常开发中的常用操作。
 
@@ -37,28 +37,38 @@
 1.  **克隆仓库**
 
     ```bash
-    git clone https://github.com/Enzohj/my_toolkit.git
+    git clone https://github.com/JaxonHu1024/my_toolkit.git
     cd my_toolkit
     ```
 
-2.  **安装依赖**
+2.  **安装项目**
 
-    基础依赖项已在 `requirements.txt` 中列出。
+    以可编辑模式安装轻量核心：
 
     ```bash
-    pip install -r setup_env/requirements.txt
+    python3 -m pip install -e .
     ```
 
-    此外，部分功能依赖于以下第三方库，建议一并安装以获得完整体验：
-
-    - `Pillow`: 图像处理
-    - `requests`: 从 URL 下载图像
-    - `tqdm`: 在并行计算中显示进度条
-
-    可以使用以下命令安装所有推荐依赖：
+    安装全部可选功能（DataFrame/Parquet、图像、进度条和 Hugging Face）：
 
     ```bash
-    pip install pandas huggingface_hub pyarrow Pillow pillow-heif requests tqdm
+    python3 -m pip install -e ".[all]"
+    ```
+
+    如需构建并安装非 editable 的 wheel：
+
+    ```bash
+    python3 -m pip wheel --no-deps . --wheel-dir dist
+    python3 -m pip install dist/my_toolkit-*.whl
+    ```
+
+    依赖和最低 Python 版本（`>=3.9`）统一定义在 `pyproject.toml`；
+    `setup_env/requirements.txt` 仅作为完整环境的兼容入口。
+
+3.  **运行测试**
+
+    ```bash
+    python3 -m unittest discover -s tests -v
     ```
 
 ## 🚀 快速开始
@@ -99,7 +109,7 @@ from my_toolkit.image import MyImage, img_to_base64, base64_to_img
 image = MyImage(path='path/to/your/image.jpg')
 # image = MyImage(url='https://example.com/image.png')
 
-# 获取 PIL.Image 对象
+# 获取独立的 PIL.Image 副本；编辑后用 MyImage(img=...) 重新包装
 pil_image = image.img
 
 # 图像格式转换
@@ -148,16 +158,21 @@ def task(item):
     time.sleep(0.1)
     return item * 2
 
-data = range(20)
+def main():
+    data = range(20)
 
-# 使用多线程处理 I/O 密集型任务
-results_thread = apply_parallel(data, task, method="thread", num_workers=4)
+    # 使用多线程处理 I/O 密集型任务
+    results_thread = apply_parallel(data, task, method="thread", num_workers=4)
 
-# 使用多进程处理 CPU 密集型任务
-results_process = apply_parallel(data, task, method="process", num_workers=4)
+    # 使用多进程处理 CPU 密集型任务
+    results_process = apply_parallel(data, task, method="process", num_workers=4)
 
-# error_policy 控制任务失败策略："store"（默认）、"raise" 或 "ignore"
-results = apply_parallel(data, task, error_policy="store")
+    # error_policy："store"（默认）、"raise" 或 "ignore"
+    results = apply_parallel(data, task, error_policy="store")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### 实用装饰器
@@ -185,6 +200,10 @@ risky_operation(should_fail=False)
 ```
 
 `@retry` 会在创建装饰器时校验重试参数。设置 `raise_on_failure=True` 可在所有尝试失败后重新抛出最后一次异常。
+
+同步 `@timeout` 属于软超时：它会停止等待，但无法终止已经在后台运行的
+Python 代码。有界 daemon worker 不会阻塞解释器退出，因此关键写入不能依赖
+已经超时的后台任务最终完成。
 
 ### 文本处理
 
@@ -219,42 +238,54 @@ print(f"清洗后文本: {cleaned_text}")
     # 示例: 在后台运行 Python 脚本
     ./scripts/hang.sh python my_train_script.py --epochs 100
     ```
-    日志会默认保存在 `./logs/hang_YYYYMMDD_HHMMSS.log`。
+    日志会保存到唯一文件，例如 `./logs/hang_YYYYMMDD_HHMMSS.XXXXXX`。
 
--   **`download_hf_ckpt.sh`**: 从 Hugging Face 镜像（`hf-mirror.com`）下载模型或数据集。
+-   **`download_hf_ckpt.sh`**: 默认从 Hugging Face 官方 endpoint 下载模型或数据集。
 
     ```bash
     # 用法: ./scripts/download_hf_ckpt.sh <模型名称> [保存目录]
     # 示例: 下载 Llama-3-8B-Instruct 到指定目录
     ./scripts/download_hf_ckpt.sh meta-llama/Meta-Llama-3-8B-Instruct /path/to/models
     ```
+    非官方 endpoint 必须显式设置 `HF_MIRROR_ALLOW=1`；该模式会禁用隐式 token，
+    并拒绝显式 `HF_TOKEN`。
 
 -   **`kill.sh` & `cmd.sh`**: 用于进程管理。
-    - `kill.sh`: 根据关键词查找并杀死相关进程，支持交互式确认。
+    - `kill.sh`: 对当前用户进程只生成一次 PID 快照，确认后先发 `TERM`，任何 `KILL` 都需要再次确认。
       ```bash
       # 用法: ./scripts/kill.sh <关键词>
       # 示例: 查找并杀死所有包含 "python" 的进程
       ./scripts/kill.sh python
       ```
-    - `cmd.sh`: 强制杀死所有占用 NVIDIA GPU 的进程，请谨慎使用。
+    - `cmd.sh`: 预览 NVIDIA GPU 使用者，需要显式安全参数，并且只发送 `TERM`。
       ```bash
-      # 用法: ./scripts/cmd.sh
+      # 只处理当前用户目标
+      ./scripts/cmd.sh --force
+
+      # 跨用户必须增加额外参数
+      ./scripts/cmd.sh --force --all-users
       ```
+
+-   **`clean.sh`**: 递归删除 basename 与指定名称完全相同的条目。脚本会记录
+    对象身份、排除目标根目录，并基于已打开的目录描述符执行删除而不跟随符号
+    链接；确认后会在删除开始前拒绝被替换的目标和挂载边界。
+
+    ```bash
+    ./scripts/clean.sh /path/to/search cache
+    ```
 
 ## 🤔 常见问题
 
 **Q: 为什么在其他目录导入 `my_toolkit` 时会提示 `ModuleNotFoundError`？**
 
-A: 这是因为 `my_toolkit` 的根目录没有被添加到 Python 的搜索路径中。你可以通过将项目根目录添加到 `PYTHONPATH` 环境变量来解决这个问题。
-
-将以下命令添加到你的 `~/.bashrc` 或 `~/.zshrc` 文件中：
+A: 应安装项目，而不是手动修改 `PYTHONPATH`：
 
 ```bash
-# 将 /path/to/your/my_toolkit 替换为你的实际项目路径
-export PYTHONPATH=$PYTHONPATH:/path/to/your/my_toolkit
+cd /path/to/my_toolkit
+python3 -m pip install -e .
 ```
 
-然后执行 `source ~/.bashrc` 或 `source ~/.zshrc` 使其生效。
+之后即可在该 Python 环境的任意工作目录导入 `my_toolkit`。
 
 ## 📄 许可
 

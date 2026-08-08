@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import asyncio
 import inspect
+import os
+import queue
 import random
+import threading
 import time
+from concurrent.futures import Future, wait
 from functools import wraps
 from typing import Any, Callable, Optional, Tuple, Type, TypeVar, Union
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 try:
     from typing import ParamSpec
@@ -20,6 +25,96 @@ R = TypeVar("R")
 __all__ = ["timer", "timeout", "retry"]
 
 _UNSET = object()  # 哨兵值，区分 "返回 None" 与 "未设置"
+
+# 同步 timeout 是软超时：只能停止调用方等待，无法强制终止已经运行的线程。
+# 自有 daemon worker 不会在解释器退出时 join 后台任务；worker 数和排队数
+# 都有上限，避免连续超时造成无界线程/内存增长。
+_TIMEOUT_MAX_WORKERS = min(32, (os.cpu_count() or 1) + 4)
+_TIMEOUT_QUEUE_SIZE = max(1, _TIMEOUT_MAX_WORKERS * 4)
+
+
+class _DaemonThreadPool:
+    """只供同步 ``timeout`` 使用的有界 daemon worker 池。"""
+
+    def __init__(self, max_workers: int, max_queue_size: int) -> None:
+        self._max_workers = max_workers
+        self._max_queue_size = max_queue_size
+        self._reset_for_current_process()
+
+    def _reset_for_current_process(self) -> None:
+        # fork 后父进程的线程与锁状态不可复用；子进程首次 submit 时重建。
+        self._pid = os.getpid()
+        self._queue: queue.Queue = queue.Queue(maxsize=self._max_queue_size)
+        self._threads: list[threading.Thread] = []
+        self._pending = 0
+        self._lock = threading.Lock()
+
+    def _ensure_current_process(self) -> None:
+        if self._pid != os.getpid():
+            self._reset_for_current_process()
+
+    def _future_finished(self, _future: Future) -> None:
+        with self._lock:
+            self._pending = max(0, self._pending - 1)
+
+    def _start_worker(self) -> None:
+        worker = threading.Thread(
+            target=self._worker,
+            name=f"my-toolkit-timeout-{len(self._threads)}",
+            daemon=True,
+        )
+        self._threads.append(worker)
+        worker.start()
+
+    def submit(
+        self,
+        func: Callable,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        *,
+        enqueue_timeout: float,
+    ) -> Future:
+        self._ensure_current_process()
+        future: Future = Future()
+        future.add_done_callback(self._future_finished)
+
+        with self._lock:
+            self._pending += 1
+            desired_workers = min(self._max_workers, self._pending)
+            if len(self._threads) < desired_workers:
+                self._start_worker()
+
+        try:
+            self._queue.put(
+                (future, func, args, kwargs),
+                block=True,
+                timeout=max(0.0, enqueue_timeout),
+            )
+        except queue.Full:
+            future.cancel()
+            raise
+        return future
+
+    def _worker(self) -> None:
+        while True:
+            future, func, args, kwargs = self._queue.get()
+            try:
+                if not future.set_running_or_notify_cancel():
+                    continue
+                try:
+                    result = func(*args, **kwargs)
+                except BaseException as exc:
+                    future.set_exception(exc)
+                else:
+                    future.set_result(result)
+            finally:
+                self._queue.task_done()
+
+
+_TIMEOUT_EXECUTOR = _DaemonThreadPool(
+    max_workers=_TIMEOUT_MAX_WORKERS,
+    max_queue_size=_TIMEOUT_QUEUE_SIZE,
+)
 
 
 # ────────────────────────────── timer ──────────────────────────────
@@ -102,11 +197,14 @@ class timer:
 
 def timeout(seconds: float) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """
-    限制函数执行时间。超时后抛出 TimeoutError。
+    限制调用方等待函数执行的时间。超时后抛出 TimeoutError。
 
-    - 同步函数: 使用 daemon ThreadPoolExecutor，超时后线程不会阻止进程退出。
-      注意线程本身不会被强制终止，仅在调用侧抛出异常。
-    - 异步函数: 使用 asyncio.wait_for，超时后任务被取消。
+    - 同步函数: 使用模块级有界 daemon worker 池。这是软超时；已经开始运行
+      的任务不会被强制终止，但不会阻塞解释器退出。解释器退出时仍在运行的
+      后台任务可能被直接终止，因此不要依赖其完成关键写入。
+    - 异步函数: 超时后取消任务，并等待取消完成。
+
+    被装饰函数主动抛出的 ``TimeoutError`` 会原样传递，不会被误判为装饰器超时。
     """
     if seconds <= 0:
         raise ValueError("timeout seconds must be positive, got %s" % seconds)
@@ -116,36 +214,64 @@ def timeout(seconds: float) -> Callable[[Callable[P, R]], Callable[P, R]]:
         if inspect.iscoroutinefunction(func):
             @wraps(func)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+                task = asyncio.create_task(func(*args, **kwargs))
                 try:
-                    return await asyncio.wait_for(
-                        func(*args, **kwargs), timeout=seconds
-                    )
-                except asyncio.TimeoutError:
-                    raise TimeoutError(
-                        "Function '%s' timed out after %ss" % (func.__name__, seconds)
-                    ) from None
+                    done, _ = await asyncio.wait({task}, timeout=seconds)
+                except asyncio.CancelledError:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    raise
+
+                if task in done:
+                    # 先由 wait 判断是否真的到达截止时间，再读取结果。这样业务代码
+                    # 主动抛出的 builtin TimeoutError（Python 3.11 起与
+                    # asyncio.TimeoutError 同类）仍会保持原异常与原消息。
+                    return await task
+
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    # 截止时间已经到达；取消清理阶段的业务异常不应替代超时结果。
+                    pass
+                raise TimeoutError(
+                    "Function '%s' timed out after %ss" % (func.__name__, seconds)
+                ) from None
 
             return async_wrapper  # type: ignore[return-value]
 
         @wraps(func)
         def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            # 不使用 `with ThreadPoolExecutor(...)`，避免 __exit__ 中
-            # shutdown(wait=True) 在超时后仍阻塞等待子线程结束。
-            executor = ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix=f"timeout-{func.__name__}",
-            )
+            deadline = time.monotonic() + seconds
             try:
-                future = executor.submit(func, *args, **kwargs)
-                try:
-                    return future.result(timeout=seconds)
-                except FutureTimeoutError:
-                    raise TimeoutError(
-                        "Function '%s' timed out after %ss" % (func.__name__, seconds)
-                    ) from None
-            finally:
-                # 不等待子线程：线程本身无法被强制终止，但主线程立即返回。
-                executor.shutdown(wait=False)
+                future = _TIMEOUT_EXECUTOR.submit(
+                    func,
+                    args,
+                    kwargs,
+                    enqueue_timeout=seconds,
+                )
+            except queue.Full:
+                raise TimeoutError(
+                    "Function '%s' timed out after %ss" % (func.__name__, seconds)
+                ) from None
+
+            remaining = max(0.0, deadline - time.monotonic())
+            done, _ = wait((future,), timeout=remaining)
+            if future in done:
+                # future.result() 在这里不使用 timeout 参数，业务 TimeoutError
+                # 因而不会与等待超时混淆。
+                return future.result()
+
+            # 仅能取消尚未开始的任务；运行中的任务会在后台继续完成。
+            future.cancel()
+            raise TimeoutError(
+                "Function '%s' timed out after %ss" % (func.__name__, seconds)
+            ) from None
 
         return sync_wrapper  # type: ignore[return-value]
 

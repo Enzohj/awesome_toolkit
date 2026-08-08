@@ -232,6 +232,16 @@ def _pillow_save_format(fmt: str) -> str:
     return _PILLOW_SAVE_FORMAT.get(fmt, fmt.upper())
 
 
+def _default_format_for_image(img: Image.Image) -> str:
+    """选择不会丢失透明度的默认编码格式。"""
+    source_format = _normalize_format(img.format)
+    if source_format is not None:
+        return source_format
+    if img.mode in _ALPHA_MODES or img.mode == "P":
+        return "png"
+    return _DEFAULT_FORMAT
+
+
 def _ensure_rgb_for_jpeg(img: Image.Image) -> Image.Image:
     """将非 JPEG 兼容模式安全转换为 RGB。
 
@@ -422,7 +432,7 @@ def img_to_bytes(img: Image.Image, fmt: Optional[str] = None) -> bytes:
         编码后的图像字节数据。
     """
     if fmt is None:
-        fmt = _normalize_format(img.format) or _DEFAULT_FORMAT
+        fmt = _default_format_for_image(img)
     else:
         fmt = _normalize_format(fmt) or _DEFAULT_FORMAT
     if fmt not in SUPPORTED_FORMATS:
@@ -569,7 +579,7 @@ class MyImage:
         'webp'
     """
 
-    __slots__ = ("_img", "_format", "_bytes", "_base64")
+    __slots__ = ("_img", "_format")
 
     def __init__(
         self,
@@ -626,8 +636,6 @@ class MyImage:
             )
 
         self._img: Optional[Image.Image] = None
-        self._bytes: Optional[bytes] = None
-        self._base64: Optional[str] = None # 始终存储 *纯* base64 字符串（不含 data URL 前缀）
         self._format: Optional[str] = None
 
         # ------ 根据来源进行加载 ------
@@ -642,25 +650,29 @@ class MyImage:
         elif url is not None:
             raw_bytes = download_bytes_from_url(url)
             self._img = bytes_to_img(raw_bytes)
-            self._bytes = raw_bytes
             self._format = _guess_format_from_bytes(raw_bytes)
 
         elif byte is not None:
             self._img = bytes_to_img(byte)
-            self._bytes = byte
             self._format = _guess_format_from_bytes(byte)
 
         elif base64 is not None:
-            prefix_fmt, pure_b64 = _strip_data_url_prefix(base64)
+            prefix_fmt, _ = _strip_data_url_prefix(base64)
             raw_bytes = base64_to_bytes(base64)
             self._img = bytes_to_img(raw_bytes)
-            self._bytes = raw_bytes
-            self._base64 = pure_b64
-            self._format = prefix_fmt or _guess_format_from_bytes(raw_bytes)
+            payload_fmt = _guess_format_from_bytes(raw_bytes) or _normalize_format(
+                self._img.format
+            )
+            if prefix_fmt is not None and prefix_fmt != payload_fmt:
+                raise ImageFormatError(
+                    "data URL 声明的图像格式与实际内容不一致: "
+                    f"声明为 {prefix_fmt!r}, 实际为 {payload_fmt!r}"
+                )
+            self._format = payload_fmt
 
         elif img is not None:
             self._img = _clone_loaded_image(img)
-            self._format = _normalize_format(img.format)
+            self._format = _default_format_for_image(img)
 
         self._format = self._format or _DEFAULT_FORMAT
 
@@ -668,8 +680,12 @@ class MyImage:
 
     @property
     def img(self) -> Image.Image:
-        """返回内部持有的 Pillow Image 对象。"""
-        return self._img
+        """返回当前 Pillow Image 的独立副本。
+
+        对返回值的编辑不会改变当前 ``MyImage``。如需保留编辑结果，请将编辑后
+        的对象重新传给 ``MyImage(img=...)``；这样格式也会按新 mode 重新选择。
+        """
+        return _clone_loaded_image(self._img)
 
     @property
     def width(self) -> int:
@@ -693,17 +709,13 @@ class MyImage:
 
     @property
     def byte(self) -> bytes:
-        """返回当前图像按 self.format 编码后的 bytes（惰性缓存）。"""
-        if self._bytes is None:
-            self._bytes = img_to_bytes(self._img, fmt=self._format)
-        return self._bytes
+        """返回当前图像按 ``self.format`` 编码后的 bytes。"""
+        return img_to_bytes(self._img, fmt=self._format)
 
     @property
     def base64(self) -> str:
-        """返回纯 base64 字符串（**不含** data URL 前缀），惰性缓存。"""
-        if self._base64 is None:
-            self._base64 = img_to_base64(self._img, fmt=self._format)
-        return self._base64
+        """返回当前像素的纯 base64 字符串（不含 data URL 前缀）。"""
+        return bytes_to_base64(self.byte)
     
     @property
     def base64_with_prefix(self) -> str:
@@ -722,7 +734,6 @@ class MyImage:
         Returns:
             包含 format, size, readable_size, mode, exif 等键的字典。
         """
-        # 通过 self.byte 属性触发惰性初始化，避免 self._bytes 为 None
         raw = self.byte
         size_bytes = len(raw)
         readable = readable_bytes_size(size_bytes)

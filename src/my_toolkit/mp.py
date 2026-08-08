@@ -18,6 +18,9 @@ multi_process
 from __future__ import annotations
 
 import os
+import warnings
+from collections.abc import Mapping as MappingABC
+from collections.abc import Sequence as SequenceABC
 from typing import (
     Any,
     Callable,
@@ -70,9 +73,31 @@ _EXECUTOR_MAP = {
     "process": ProcessPoolExecutor,
 }
 
-NUM_WORKERS: int = int(
-    os.environ.get("NUM_WORKERS", min(os.cpu_count() or 1, 8))
-)
+_DEFAULT_NUM_WORKERS = min(os.cpu_count() or 1, 8)
+
+
+def _resolve_default_num_workers() -> int:
+    raw_value = os.environ.get("NUM_WORKERS")
+    if raw_value is None:
+        return _DEFAULT_NUM_WORKERS
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        value = 0
+
+    if value < 1:
+        warnings.warn(
+            f"Invalid NUM_WORKERS environment value {raw_value!r}; "
+            f"falling back to {_DEFAULT_NUM_WORKERS}.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return _DEFAULT_NUM_WORKERS
+    return value
+
+
+NUM_WORKERS: int = _resolve_default_num_workers()
 
 # 分批提交的默认批次大小，防止一次性创建过多 Future 导致 OOM
 _DEFAULT_BATCH_SIZE = 5000
@@ -107,18 +132,17 @@ def _resolve_iterable(iterable: Any) -> tuple[Sequence[Any], int]:
         items = iterable.to_dict(orient="records")
         return items, len(items)
 
-    if isinstance(iterable, (list, tuple, range)):
+    # Mapping 的公开迭代语义是遍历 key。不能把它当作可切片序列，
+    # 否则后续 seq[start:stop] 会把 slice 当成 key 查询。
+    if isinstance(iterable, MappingABC):
+        items = list(iterable)
+        return items, len(items)
+
+    if isinstance(iterable, SequenceABC):
         return iterable, len(iterable)
 
-    # 有 __len__ / __iter__ / __getitem__ 的类序列对象（如 ndarray 等）
-    if (
-        hasattr(iterable, "__len__")
-        and hasattr(iterable, "__iter__")
-        and hasattr(iterable, "__getitem__")
-    ):
-        return iterable, len(iterable)
-
-    # 生成器 / 纯迭代器 / set 等非稳定可切片对象 — 必须物化
+    # 生成器、set、ndarray 以及只支持整数索引但不支持切片的对象均物化。
+    # 这比仅检查 __getitem__ 更安全，因为该方法也可能只接受普通 key。
     logger.warning(
         f"iterable type is {type(iterable).__name__}, materializing to list..."
     )
@@ -189,7 +213,7 @@ def apply_parallel(
 
     Examples
     --------
-    >>> from mp import apply_parallel
+    >>> from my_toolkit.mp import apply_parallel
     >>> results = apply_parallel(range(10), lambda x: x ** 2, method="thread")
     >>> assert results == [i ** 2 for i in range(10)]
     """

@@ -11,7 +11,7 @@ Features
 
 Quick Start
 -----------
->>> from logger import init_logger, set_level
+>>> from my_toolkit.logger import init_logger, set_level
 >>> log = init_logger("demo")
 >>> log.debug("debug msg")
 >>> log.info("hello %s", "world")

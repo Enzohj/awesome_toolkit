@@ -1,11 +1,11 @@
 # my_toolkit
-[![GitHub Repo stars](https://img.shields.io/github/stars/Enzohj/my_toolkit?style=social)](https://github.com/Enzohj/my_toolkit/stargazers)
-[![GitHub last commit](https://img.shields.io/github/last-commit/Enzohj/my_toolkit)](https://github.com/Enzohj/my_toolkit/commits/main)
-[![GitHub license](https://img.shields.io/github/license/Enzohj/my_toolkit)](https://github.com/Enzohj/my_toolkit/blob/main/LICENSE)
+[![GitHub Repo stars](https://img.shields.io/github/stars/JaxonHu1024/my_toolkit?style=social)](https://github.com/JaxonHu1024/my_toolkit/stargazers)
+[![GitHub last commit](https://img.shields.io/github/last-commit/JaxonHu1024/my_toolkit)](https://github.com/JaxonHu1024/my_toolkit/commits/main)
+[![GitHub license](https://img.shields.io/github/license/JaxonHu1024/my_toolkit)](https://github.com/JaxonHu1024/my_toolkit/blob/main/LICENSE)
 
 A simple and easy-to-use Python toolkit designed to streamline common operations in daily development.
 
-[ English | [中文](README_zh.md) ]
+[ English | [中文](https://github.com/JaxonHu1024/my_toolkit/blob/main/README_zh.md) ]
 
 ---
 
@@ -38,28 +38,40 @@ A simple and easy-to-use Python toolkit designed to streamline common operations
 1.  **Clone the Repository**
 
     ```bash
-    git clone https://github.com/Enzohj/my_toolkit.git
+    git clone https://github.com/JaxonHu1024/my_toolkit.git
     cd my_toolkit
     ```
 
-2.  **Install Dependencies**
+2.  **Install the Package**
 
-    The basic dependencies are listed in `setup_env/requirements.txt`.
+    Install the lightweight core in editable mode:
 
     ```bash
-    pip install -r setup_env/requirements.txt
+    python3 -m pip install -e .
     ```
 
-    Additionally, some features depend on the following third-party libraries. It is recommended to install them for the full experience:
-
-    - `Pillow`: For image processing.
-    - `requests`: For downloading images from URLs.
-    - `tqdm`: For displaying progress bars in parallel computations.
-
-    You can install all recommended dependencies with the following command:
+    Install every optional feature (DataFrame/Parquet, images, progress bars,
+    and Hugging Face helpers):
 
     ```bash
-    pip install pandas huggingface_hub pyarrow Pillow pillow-heif requests tqdm
+    python3 -m pip install -e ".[all]"
+    ```
+
+    To build and install a non-editable wheel artifact:
+
+    ```bash
+    python3 -m pip wheel --no-deps . --wheel-dir dist
+    python3 -m pip install dist/my_toolkit-*.whl
+    ```
+
+    Dependencies and the supported Python floor (`>=3.9`) are declared in
+    `pyproject.toml`. The compatibility file `setup_env/requirements.txt`
+    mirrors the full optional environment.
+
+3.  **Run the Test Suite**
+
+    ```bash
+    python3 -m unittest discover -s tests -v
     ```
 
 ## 🚀 Quickstart
@@ -100,7 +112,7 @@ from my_toolkit.image import MyImage, img_to_base64, base64_to_img
 image = MyImage(path='path/to/your/image.jpg')
 # image = MyImage(url='https://example.com/image.png')
 
-# Get the PIL.Image object
+# Get an independent PIL.Image copy. Rewrap edited copies with MyImage(img=...).
 pil_image = image.img
 
 # Convert between image formats
@@ -149,16 +161,21 @@ def task(item):
     time.sleep(0.1)
     return item * 2
 
-data = range(20)
+def main():
+    data = range(20)
 
-# Use multi-threading for I/O-bound tasks
-results_thread = apply_parallel(data, task, method="thread", num_workers=4)
+    # Use multi-threading for I/O-bound tasks
+    results_thread = apply_parallel(data, task, method="thread", num_workers=4)
 
-# Use multi-processing for CPU-bound tasks
-results_process = apply_parallel(data, task, method="process", num_workers=4)
+    # Use multi-processing for CPU-bound tasks
+    results_process = apply_parallel(data, task, method="process", num_workers=4)
 
-# error_policy controls task failures: "store" (default), "raise", or "ignore"
-results = apply_parallel(data, task, error_policy="store")
+    # error_policy: "store" (default), "raise", or "ignore"
+    results = apply_parallel(data, task, error_policy="store")
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ### Useful Decorators
@@ -186,6 +203,10 @@ risky_operation(should_fail=False)
 ```
 
 `@retry` validates retry parameters up front. Set `raise_on_failure=True` to re-raise the last exception after all attempts are exhausted.
+
+Synchronous `@timeout` is a soft timeout: it stops waiting but cannot stop Python
+code already running in the background. Its bounded daemon workers do not block
+interpreter exit, so do not rely on timed-out work to finish critical writes.
 
 ### Text Processing
 
@@ -220,42 +241,56 @@ The `scripts` directory contains some useful scripts for daily development and m
     # Example: Run a Python script in the background
     ./scripts/hang.sh python my_train_script.py --epochs 100
     ```
-    Logs are saved by default to `./logs/hang_YYYYMMDD_HHMMSS.log`.
+    Logs are saved to unique files such as `./logs/hang_YYYYMMDD_HHMMSS.XXXXXX`.
 
--   **`download_hf_ckpt.sh`**: Downloads a model or dataset from a Hugging Face mirror (`hf-mirror.com`).
+-   **`download_hf_ckpt.sh`**: Downloads a model or dataset from the official Hugging Face endpoint by default.
 
     ```bash
     # Usage: ./scripts/download_hf_ckpt.sh <model_name> [save_directory]
     # Example: Download Llama-3-8B-Instruct to a specific directory
     ./scripts/download_hf_ckpt.sh meta-llama/Meta-Llama-3-8B-Instruct /path/to/models
     ```
+    A non-official endpoint requires `HF_MIRROR_ALLOW=1`; implicit tokens are
+    disabled and an explicit `HF_TOKEN` is rejected for that mode.
 
 -   **`kill.sh` & `cmd.sh`**: Used for process management.
-    - `kill.sh`: Finds and kills processes based on a keyword, with an interactive confirmation prompt.
+    - `kill.sh`: Takes one current-user PID snapshot, confirms it, sends `TERM`, and asks again before any `KILL`.
       ```bash
       # Usage: ./scripts/kill.sh <keyword>
       # Example: Find and kill all processes containing "python"
       ./scripts/kill.sh python
       ```
-    - `cmd.sh`: Forcibly kills all processes using NVIDIA GPUs. Use with caution.
+    - `cmd.sh`: Previews NVIDIA GPU users and requires an explicit safety flag. It sends `TERM` only.
       ```bash
-      # Usage: ./scripts/cmd.sh
+      # Current-user targets only
+      ./scripts/cmd.sh --force
+
+      # Cross-user targets require an additional explicit flag
+      ./scripts/cmd.sh --force --all-users
       ```
+
+-   **`clean.sh`**: Recursively removes entries whose basename exactly matches
+    the requested name. It snapshots object identities, excludes the target
+    root, and deletes relative to open directory descriptors without following
+    symlinks. Replaced targets and mount boundaries are rejected after
+    confirmation, before deletion starts.
+
+    ```bash
+    ./scripts/clean.sh /path/to/search cache
+    ```
 
 ## 🤔 FAQ
 
 **Q: Why do I get a `ModuleNotFoundError` when importing `my_toolkit` from another directory?**
 
-A: This is because the root directory of `my_toolkit` has not been added to Python's search path. You can solve this by adding the project's root directory to the `PYTHONPATH` environment variable.
-
-Add the following command to your `~/.bashrc` or `~/.zshrc` file:
+A: Install the package instead of editing `PYTHONPATH`:
 
 ```bash
-# Replace /path/to/your/my_toolkit with the actual path to your project
-export PYTHONPATH=$PYTHONPATH:/path/to/your/my_toolkit
+cd /path/to/my_toolkit
+python3 -m pip install -e .
 ```
 
-Then, run `source ~/.bashrc` or `source ~/.zshrc` to apply the changes.
+The package can then be imported from any working directory in that Python environment.
 
 ## 📄 License
 

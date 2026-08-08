@@ -12,11 +12,19 @@ import inspect
 import json
 import os
 import pickle
+import stat
+import tempfile
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError as exc:
+    pd = None
+    _PANDAS_IMPORT_ERROR: Optional[ImportError] = exc
+else:
+    _PANDAS_IMPORT_ERROR = None
 
 try:
     from tqdm import tqdm
@@ -37,7 +45,7 @@ __all__ = [
     # JSONL
     "read_jsonl", "write_jsonl",
     # Parquet
-    "read_parquet", "write_parquet",
+    "ParquetReadError", "read_parquet", "write_parquet",
     # Pickle
     "read_pickle", "write_pickle",
     # Dispatcher
@@ -47,9 +55,41 @@ __all__ = [
 PathLike = Union[str, Path]
 
 
+class ParquetReadError(RuntimeError):
+    """目录中的一个或多个 Parquet 分片读取失败。"""
+
+    def __init__(
+        self,
+        file_root: PathLike,
+        failures: Dict[Path, Exception],
+        *,
+        native_error: Optional[Exception] = None,
+    ) -> None:
+        self.file_root = Path(file_root)
+        self.failures = dict(failures)
+        self.native_error = native_error
+        failed_names = ", ".join(
+            str(path.relative_to(self.file_root))
+            for path in self.failures
+        )
+        super().__init__(
+            f"Failed to read {len(self.failures)} Parquet shard(s) "
+            f"from '{self.file_root}': {failed_names}"
+        )
+
+
 # ========================
 # 内部工具
 # ========================
+
+def _require_pandas(feature: str) -> Any:
+    """返回 pandas；可选依赖缺失时给出可执行的安装提示。"""
+    if pd is None:
+        raise ImportError(
+            f"{feature} requires the optional dependency 'pandas'. "
+            "Install it with `pip install 'my-toolkit[data]'`."
+        ) from _PANDAS_IMPORT_ERROR
+    return pd
 
 def _ensure_parent(file_path: Path) -> None:
     """若父目录不存在则自动创建。"""
@@ -62,24 +102,28 @@ def _to_path(file_path: PathLike) -> Path:
     return Path(file_path)
 
 
-def _filter_supported_kwargs(
+def _validate_supported_kwargs(
     func: Any,
     kwargs: Dict[str, Any],
     *,
     allowed: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
-    """过滤出目标函数支持的关键字参数。
+    """校验并返回目标函数支持的关键字参数。
 
     Python 3.11 中许多 C 扩展/内建函数（例如 ``csv.reader``）没有
-    ``__code__`` 属性，不能再依赖 ``func.__code__.co_varnames`` 做参数过滤。
-    这里优先使用 ``inspect.signature``，对无法 introspect 的内建函数允许传入
-    显式白名单，保证在 Python 3.11 下稳定运行。
+    ``__code__`` 属性，不能依赖 ``func.__code__.co_varnames`` 做参数校验。
+    这里优先使用 ``inspect.signature``；对无法 introspect 的内建函数允许传入
+    显式白名单。未知参数必须抛出 ``TypeError``，避免调用方误以为参数已生效。
     """
     if not kwargs:
         return {}
 
     if allowed is not None:
-        return {k: v for k, v in kwargs.items() if k in allowed}
+        unsupported = set(kwargs) - allowed
+        if unsupported:
+            names = ", ".join(sorted(unsupported))
+            raise TypeError(f"Unexpected keyword argument(s): {names}")
+        return dict(kwargs)
 
     try:
         signature = inspect.signature(func)
@@ -99,7 +143,11 @@ def _filter_supported_kwargs(
             inspect.Parameter.KEYWORD_ONLY,
         )
     }
-    return {k: v for k, v in kwargs.items() if k in supported}
+    unsupported = set(kwargs) - supported
+    if unsupported:
+        names = ", ".join(sorted(unsupported))
+        raise TypeError(f"Unexpected keyword argument(s): {names}")
+    return dict(kwargs)
 
 
 def _file_is_empty_or_missing(file_path: Path) -> bool:
@@ -242,9 +290,10 @@ def read_csv(
     path = _to_path(file_path)
 
     if format == "dataframe":
+        pandas = _require_pandas("CSV DataFrame reading")
         # 校验 kwargs 是否包含 pandas.read_csv 不支持的参数
-        supported_kwargs = _filter_supported_kwargs(pd.read_csv, kwargs)
-        df = pd.read_csv(path, sep=sep, encoding=encoding, **supported_kwargs)
+        supported_kwargs = _validate_supported_kwargs(pandas.read_csv, kwargs)
+        df = pandas.read_csv(path, sep=sep, encoding=encoding, **supported_kwargs)
         if replace_na:
             # 转为 object dtype 后再替换,避免 pandas 2.x 的 FutureWarning
             df = df.astype(object).where(df.notna(), None)
@@ -257,8 +306,8 @@ def read_csv(
     if format == "list":
         with path.open("r", encoding=encoding, newline="") as f:
             # csv.reader 是 C 内建函数，Python 3.11 下没有 __code__ 属性；
-            # 使用显式 fmtparams 白名单过滤。
-            supported_kwargs = _filter_supported_kwargs(
+            # 使用显式 fmtparams 白名单校验。
+            supported_kwargs = _validate_supported_kwargs(
                 csv.reader,
                 kwargs,
                 allowed=_CSV_FMTPARAMS,
@@ -301,11 +350,15 @@ def write_csv(
     mode = "a" if append else "w"
 
     if isinstance(data, dict):
-        data = pd.DataFrame(data)
+        pandas = _require_pandas("CSV DataFrame writing")
+        data = pandas.DataFrame(data)
 
-    if isinstance(data, pd.DataFrame):
+    if pd is not None and isinstance(data, pd.DataFrame):
         # 追加模式下不重复写入 header
         write_header = not append or _file_is_empty_or_missing(file_path)
+        if append and _needs_append_newline(file_path):
+            with open(file_path, "a", encoding=encoding, newline="") as f:
+                f.write("\n")
         data.to_csv(
             file_path, index=False, sep=sep, mode=mode,
             encoding=encoding, header=write_header, **kwargs,
@@ -325,12 +378,15 @@ def write_csv(
         write_header = bool(header) and (
             not append or _file_is_empty_or_missing(file_path)
         )
+        needs_append_newline = append and _needs_append_newline(file_path)
+        supported_kwargs = _validate_supported_kwargs(
+            csv.writer,
+            kwargs,
+            allowed=_CSV_FMTPARAMS,
+        )
         with open(file_path, mode, newline="", encoding=encoding) as f:
-            supported_kwargs = _filter_supported_kwargs(
-                csv.writer,
-                kwargs,
-                allowed=_CSV_FMTPARAMS,
-            )
+            if needs_append_newline:
+                f.write("\n")
             writer = csv.writer(f, delimiter=sep, **supported_kwargs)
             if write_header:
                 logger.info(f"CSV header: {header}")
@@ -340,6 +396,8 @@ def write_csv(
                 f"Write {len(data)} rows to '{file_path}' "
                 f"in {'append' if append else 'write'} mode"
             )
+    elif pd is None:
+        _require_pandas("CSV DataFrame writing")
     else:
         raise TypeError(
             f"Unsupported data type: {type(data).__name__}. "
@@ -394,8 +452,30 @@ def write_json(
     """
     file_path = _to_path(file_path)
     _ensure_parent(file_path)
-    with open(file_path, "w", encoding=encoding) as f:
-        json.dump(data, f, ensure_ascii=ensure_ascii, indent=indent)
+    existing_mode = (
+        stat.S_IMODE(file_path.stat().st_mode) if file_path.exists() else None
+    )
+    temp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding=encoding,
+            dir=file_path.parent,
+            prefix=f".{file_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as f:
+            temp_path = Path(f.name)
+            json.dump(data, f, ensure_ascii=ensure_ascii, indent=indent)
+            if existing_mode is not None:
+                os.fchmod(f.fileno(), existing_mode)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, file_path)
+    except BaseException:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
     logger.info(f"Write JSON data to '{file_path}'")
 
 
@@ -466,6 +546,7 @@ def read_parquet(
     engine: str = "auto",
     ignore: Optional[List[str]] = None,
     verbose: bool = False,
+    allow_partial: bool = False,
 ) -> pd.DataFrame:
     """
     读取 Parquet 文件或目录。
@@ -477,10 +558,16 @@ def read_parquet(
                 匹配规则为精确文件名匹配或以 '.' 开头的后缀匹配，
                 不再使用子串匹配，避免误杀正常文件。
         verbose: 是否额外打印 DataFrame.info()，默认 False（避免大表日志刷屏）。
+        allow_partial: 目录降级读取时是否允许跳过损坏分片，默认 False。
+                       设为 True 时会记录 warning 并返回成功读取的部分数据。
 
     返回:
-        合并后的 DataFrame；读取失败时返回空 DataFrame。
+        合并后的 DataFrame；目录中没有候选分片时返回空 DataFrame。
+
+    异常:
+        ParquetReadError: 目录降级读取时有分片失败且 allow_partial=False。
     """
+    pandas = _require_pandas("Parquet reading")
     if ignore is None:
         ignore = ["_SUCCESS"]
 
@@ -490,7 +577,7 @@ def read_parquet(
     if file_root.is_file():
         # 单文件读取失败直接抛出异常，避免静默返回空 DataFrame 导致调用方误用；
         # 仅目录逐分片模式才做兜底。
-        data = pd.read_parquet(file_root, engine=engine)
+        data = pandas.read_parquet(file_root, engine=engine)
         logger.info(f"Read Parquet file '{file_root}'. Shape: {data.shape}")
         if verbose:
             _log_dataframe_info(data)
@@ -499,13 +586,15 @@ def read_parquet(
     # ---------- 目录 ----------
     if file_root.is_dir():
         # 优先尝试引擎原生目录读取
+        native_error: Optional[Exception] = None
         try:
-            data = pd.read_parquet(file_root, engine=engine)
+            data = pandas.read_parquet(file_root, engine=engine)
             logger.info(f"Read Parquet dir '{file_root}'. Shape: {data.shape}")
             if verbose:
                 _log_dataframe_info(data)
             return data
         except Exception as e:
+            native_error = e
             logger.error(
                 f"Error: {e}, falling back to per-file reading."
             )
@@ -517,13 +606,24 @@ def read_parquet(
         def _should_ignore(p: Path) -> bool:
             return p.name in ignore_names or p.suffix.lower() in ignore_suffixes
 
-        # 递归收集所有文件，按路径排序保证顺序稳定
+        def _is_parquet_candidate(p: Path) -> bool:
+            if _should_ignore(p):
+                return False
+            suffix = p.suffix.lower()
+            if suffix in {".parquet", ".parq", ".pq"}:
+                return True
+            # Hadoop/Spark 等数据集常见的无后缀分片名。
+            return not suffix and p.name.lower().startswith(("part-", "part_"))
+
+        # 只尝试明确的 Parquet 文件及常见无后缀分片，避免把 README 等
+        # 目录附属文件误报为损坏分片；按路径排序保证顺序稳定。
         part_paths = sorted(
-            p for p in file_root.rglob("*") if p.is_file() and not _should_ignore(p)
+            p for p in file_root.rglob("*") if p.is_file() and _is_parquet_candidate(p)
         )
 
         # 逐文件读取并拼接
         chunks: List[pd.DataFrame] = []
+        failures: Dict[Path, Exception] = {}
         iterator = part_paths
         if tqdm is not None:
             iterator = tqdm(
@@ -534,16 +634,35 @@ def read_parquet(
 
         for part_path in iterator:
             try:
-                chunk = pd.read_parquet(part_path, engine=engine)
+                chunk = pandas.read_parquet(part_path, engine=engine)
                 logger.debug(
                     f"Read '{part_path.relative_to(file_root)}'. Shape: {chunk.shape}"
                 )
                 chunks.append(chunk)
             except Exception as e:
+                failures[part_path] = e
                 logger.error(f"Error reading '{part_path}': {e}")
 
+        if failures and not allow_partial:
+            error = ParquetReadError(
+                file_root,
+                failures,
+                native_error=native_error,
+            )
+            raise error from next(iter(failures.values()))
+
+        if failures:
+            failed_names = ", ".join(
+                str(path.relative_to(file_root)) for path in failures
+            )
+            logger.warning(
+                "Returning partial Parquet data from '%s'; failed shard(s): %s",
+                file_root,
+                failed_names,
+            )
+
         if chunks:
-            data = pd.concat(chunks, ignore_index=True)
+            data = pandas.concat(chunks, ignore_index=True)
             logger.info(
                 f"Concatenated {len(chunks)} Parquet files. Shape: {data.shape}"
             )
@@ -552,7 +671,7 @@ def read_parquet(
             return data
 
         logger.warning(f"No valid Parquet data found in '{file_root}'")
-        return pd.DataFrame()
+        return pandas.DataFrame()
 
     raise FileNotFoundError(f"Path does not exist: {file_root}")
 
@@ -566,6 +685,7 @@ def write_parquet(df: pd.DataFrame, file_path: PathLike, **kwargs: Any) -> None:
         file_path: 文件路径。
         **kwargs: 传递给 DataFrame.to_parquet 的额外参数。
     """
+    _require_pandas("Parquet writing")
     file_path = _to_path(file_path)
     _ensure_parent(file_path)
     df.to_parquet(file_path, **kwargs)

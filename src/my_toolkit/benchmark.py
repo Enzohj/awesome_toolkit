@@ -5,7 +5,7 @@ benchmark.py — 可复用的 Python 并行压测工具
 功能：对指定函数在给定数据集上进行并行压测，实时显示进度条，最终生成结构化压测报告。
 
 使用方式：
-    from benchmark import benchmark, print_report
+    from my_toolkit.benchmark import benchmark, print_report
 
     result = benchmark(my_func, data_list, concurrency=20, repeat=3, timeout=5)
     print_report(result)
@@ -47,10 +47,11 @@ class _TaskResult:
     """单次调用的结果记录。"""
     index: int              # 对应 data_list 的索引
     repeat_round: int       # 第几轮 repeat
-    latency: float          # 耗时（秒）
+    latency: float | None   # 函数实际耗时（秒）；基础设施失败时未知
     success: bool = True
     is_timeout: bool = False
     error: str | None = None
+    error_kind: str | None = None
     return_value: Any = None
 
 
@@ -118,18 +119,34 @@ def _run_one(
             latency=latency,
             success=not timed_out,
             is_timeout=timed_out,
+            error_kind="timeout" if timed_out else None,
             return_value=None if timed_out else ret,
         )
     except Exception as exc:
         latency = time.perf_counter() - t0
+        timed_out = timeout is not None and latency > timeout
         return _TaskResult(
             index=index,
             repeat_round=rnd,
             latency=latency,
             success=False,
-            is_timeout=timeout is not None and latency > timeout,
+            is_timeout=timed_out,
             error=f"{type(exc).__name__}: {exc}",
+            error_kind="timeout" if timed_out else "function",
         )
+
+
+def _infrastructure_failure(index: int, rnd: int, exc: BaseException) -> _TaskResult:
+    """将 executor/pool 层失败记录为无函数延迟的基础设施错误。"""
+    return _TaskResult(
+        index=index,
+        repeat_round=rnd,
+        latency=None,
+        success=False,
+        is_timeout=False,
+        error=f"{type(exc).__name__}: {exc}",
+        error_kind="infrastructure",
+    )
 
 
 # ═══════════════════════════════════════════════
@@ -269,6 +286,7 @@ def benchmark(
         "success_count": int,
         "fail_count": int,
         "timeout_count": int,
+        "infrastructure_error_count": int,
         "success_rate": float,      # 成功率百分比
         "total_time": float,        # 秒
         "qps": float,
@@ -309,7 +327,8 @@ def benchmark(
     if total_requests == 0:
         empty_report: dict[str, Any] = {
             "total_requests": 0, "success_count": 0,
-            "fail_count": 0, "timeout_count": 0, "success_rate": 100.0,
+            "fail_count": 0, "timeout_count": 0,
+            "infrastructure_error_count": 0, "success_rate": 100.0,
             "total_time": 0.0, "qps": 0.0,
             "latency_stats": dict(_ZERO_LATENCY),
             "concurrency": concurrency, "repeat": repeat,
@@ -320,23 +339,43 @@ def benchmark(
         return empty_report
 
     task_results: list[_TaskResult] = []
+    func_name = getattr(func, "__name__", None) or type(func).__name__
     logger.info(
-        f"benchmark: {func.__name__}, {total_requests} requests, "
+        f"benchmark: {func_name}, {total_requests} requests, "
         f"{concurrency} workers, {repeat} rounds"
     )
 
     # ── 主调度 ──
     wall_start = time.perf_counter()
 
-    with PoolClass(max_workers=concurrency) as pool:
-        future_map: dict[Future, tuple[int, int]] = {}
-        for rnd in range(repeat):
-            for idx, item in enumerate(data_list):
-                fut = pool.submit(_run_one, func, idx, item, rnd, timeout)
-                future_map[fut] = (idx, rnd)
+    progress = _ProgressBar(total_requests) if show_progress else None
 
-        progress = _ProgressBar(total_requests) if show_progress else None
+    def record(result: _TaskResult) -> None:
+        task_results.append(result)
+        if progress:
+            progress.update(success=result.success, is_timeout=result.is_timeout)
+
+    pool = None
+    try:
         try:
+            pool = PoolClass(max_workers=concurrency)
+        except Exception as exc:
+            # 进程池可能因系统资源/权限限制而无法创建。此时每个计划请求都
+            # 是基础设施失败，而不是函数超时。
+            for rnd in range(repeat):
+                for idx in range(data_size):
+                    record(_infrastructure_failure(idx, rnd, exc))
+        else:
+            future_map: dict[Future, tuple[int, int]] = {}
+            for rnd in range(repeat):
+                for idx, item in enumerate(data_list):
+                    try:
+                        fut = pool.submit(_run_one, func, idx, item, rnd, timeout)
+                    except Exception as exc:
+                        record(_infrastructure_failure(idx, rnd, exc))
+                    else:
+                        future_map[fut] = (idx, rnd)
+
             for fut in as_completed(future_map):
                 idx, rnd = future_map[fut]
                 try:
@@ -344,20 +383,13 @@ def benchmark(
                 except Exception as exc:
                     # 仅捕获 pool 层面异常（序列化失败等），
                     # func 本身的异常已在 _run_one 内部处理
-                    result = _TaskResult(
-                        index=idx,
-                        repeat_round=rnd,
-                        latency=timeout or 0.0,
-                        success=False,
-                        is_timeout=True,
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
-                task_results.append(result)
-                if progress:
-                    progress.update(success=result.success, is_timeout=result.is_timeout)
-        finally:
-            if progress:
-                progress.close()
+                    result = _infrastructure_failure(idx, rnd, exc)
+                record(result)
+    finally:
+        if pool is not None:
+            pool.shutdown(wait=True)
+        if progress:
+            progress.close()
 
     total_time = time.perf_counter() - wall_start
 
@@ -368,8 +400,13 @@ def benchmark(
     success_count = sum(1 for r in task_results if r.success)
     fail_count = total_requests - success_count
     timeout_count = sum(1 for r in task_results if r.is_timeout)
+    infrastructure_error_count = sum(
+        1 for r in task_results if r.error_kind == "infrastructure"
+    )
 
-    latencies_ms = sorted(r.latency * 1000.0 for r in task_results)
+    latencies_ms = sorted(
+        r.latency * 1000.0 for r in task_results if r.latency is not None
+    )
     latency_stats = _compute_latency_stats(latencies_ms)
     qps = total_requests / total_time if total_time > 0 else 0.0
 
@@ -388,8 +425,11 @@ def benchmark(
             "index": r.index,
             "round": r.repeat_round,
             "error": r.error,
+            "error_kind": r.error_kind,
             "is_timeout": r.is_timeout,
-            "latency_ms": round(r.latency * 1000, 2),
+            "latency_ms": (
+                round(r.latency * 1000, 2) if r.latency is not None else None
+            ),
         }
         for r in task_results
         if not r.success
@@ -400,6 +440,7 @@ def benchmark(
         "success_count": success_count,
         "fail_count": fail_count,
         "timeout_count": timeout_count,
+        "infrastructure_error_count": infrastructure_error_count,
         "success_rate": round(success_count / total_requests * 100, 2),
         "total_time": round(total_time, 4),
         "qps": round(qps, 2),
@@ -464,6 +505,7 @@ def print_report(report: dict[str, Any], file: Any = None) -> None:
         f"  |  Success         : {report['success_count']:<31}|",
         f"  |  Failures        : {report['fail_count']:<31}|",
         f"  |  Timeouts        : {report['timeout_count']:<31}|",
+        f"  |  Infra errors    : {report.get('infrastructure_error_count', 0):<31}|",
         f"  |  Success rate    : {sr_s:<31}|",
         f"  |  Total time      : {total_time_s:<31}|",
         f"  |  QPS             : {qps_s:<31}|",
@@ -486,12 +528,18 @@ def print_report(report: dict[str, Any], file: Any = None) -> None:
         lines.append("")
         lines.append(f"  +-- Errors (first 10 of {len(errors)}) -------------------------+")
         for e in errors[:10]:
-            tag = "[TIMEOUT]" if e["is_timeout"] else "[ERROR]  "
+            if e["is_timeout"]:
+                tag = "[TIMEOUT]"
+            elif e.get("error_kind") == "infrastructure":
+                tag = "[INFRA]  "
+            else:
+                tag = "[ERROR]  "
             e_idx = e["index"]
             e_rnd = e["round"]
             e_lat = e["latency_ms"]
+            e_lat_s = "N/A" if e_lat is None else f"{e_lat:.2f}ms"
             lines.append(
-                f"  |  {tag} idx={e_idx:>4}  round={e_rnd}  {e_lat:>9.2f}ms"
+                f"  |  {tag} idx={e_idx:>4}  round={e_rnd}  {e_lat_s:>11}"
             )
             msg = (e["error"] or "")[:50]
             lines.append(f"  |    -> {msg}")

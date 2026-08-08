@@ -1,4 +1,4 @@
-"""test/decorator.py
+"""tests/test_decorator.py
 
 对 `my_toolkit.decorator` 的最小可运行测试脚本（timer/timeout/retry）。
 """
@@ -6,20 +6,13 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
+import threading
 import time
 import unittest
-from pathlib import Path
-import sys
-import importlib
 
-
-def _import_module():
-    root = Path(__file__).resolve().parents[1]
-    sys.path.insert(0, str(root.parent))
-    return importlib.import_module("my_toolkit.decorator")
-
-
-decorator_mod = _import_module()
+import my_toolkit.decorator as decorator_mod
 
 
 class TestTimer(unittest.TestCase):
@@ -61,6 +54,54 @@ class TestTimeout(unittest.TestCase):
             slow()
         self.assertLess(time.perf_counter() - t0, 1.0)
 
+    def test_timeout_sync_is_soft_and_work_can_finish_in_background(self):
+        finished = threading.Event()
+
+        @decorator_mod.timeout(0.01)
+        def slow_side_effect():
+            time.sleep(0.03)
+            finished.set()
+
+        with self.assertRaises(TimeoutError):
+            slow_side_effect()
+
+        self.assertTrue(finished.wait(0.5))
+
+    def test_timeout_sync_background_work_does_not_block_process_exit(self):
+        script = """
+import time
+from my_toolkit.decorator import timeout
+
+@timeout(0.01)
+def never_finishes_during_the_test():
+    time.sleep(5)
+
+try:
+    never_finishes_during_the_test()
+except TimeoutError:
+    print("timed out", flush=True)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "timed out")
+
+    def test_timeout_sync_preserves_business_timeout_error(self):
+        business_error = TimeoutError("upstream service timed out")
+
+        @decorator_mod.timeout(1)
+        def fail():
+            raise business_error
+
+        with self.assertRaises(TimeoutError) as caught:
+            fail()
+        self.assertIs(caught.exception, business_error)
+
     def test_timeout_async_raises(self):
         @decorator_mod.timeout(0.05)
         async def slow_async():
@@ -69,6 +110,31 @@ class TestTimeout(unittest.TestCase):
 
         with self.assertRaises(TimeoutError):
             asyncio.run(slow_async())
+
+    def test_timeout_async_preserves_business_timeout_error(self):
+        business_error = TimeoutError("database deadline exceeded")
+
+        @decorator_mod.timeout(1)
+        async def fail_async():
+            raise business_error
+
+        with self.assertRaises(TimeoutError) as caught:
+            asyncio.run(fail_async())
+        self.assertIs(caught.exception, business_error)
+
+    def test_timeout_async_cancels_a_truly_timed_out_task(self):
+        cancelled = threading.Event()
+
+        @decorator_mod.timeout(0.01)
+        async def cancellable():
+            try:
+                await asyncio.sleep(1)
+            finally:
+                cancelled.set()
+
+        with self.assertRaises(TimeoutError):
+            asyncio.run(cancellable())
+        self.assertTrue(cancelled.is_set())
 
 
 class TestRetry(unittest.TestCase):
@@ -119,4 +185,3 @@ class TestRetry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
